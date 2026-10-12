@@ -348,6 +348,8 @@ describe("Tool Definitions", () => {
     { name: "update_location", requiredFields: ["organization_id", "id"], properties: ["organization_id", "id", "name", "country_id", "region_id", "address_1", "address_2", "city", "postal_code", "phone", "fax", "notes", "primary"] },
     { name: "search_passwords", requiredFields: [] as string[], properties: ["organization_id", "name", "password_category_id", "url", "username", "page_size", "page_number", "sort"] },
     { name: "get_password", requiredFields: ["id"], properties: ["id", "show_password"] },
+    { name: "create_password", requiredFields: ["organization_id", "name", "password"], properties: ["organization_id", "name", "username", "password", "url", "notes", "password_category_id"] },
+    { name: "update_password", requiredFields: ["organization_id", "id"], properties: ["organization_id", "id", "name", "username", "password", "url", "notes", "password_category_id"] },
     { name: "search_documents", requiredFields: ["organization_id"] as string[], properties: ["organization_id", "name", "page_size", "page_number", "sort"] },
     { name: "get_document", requiredFields: ["organization_id", "id"], properties: ["organization_id", "id"] },
     { name: "list_document_folders", requiredFields: ["organization_id"], properties: ["organization_id", "name", "page_size", "page_number"] },
@@ -382,8 +384,8 @@ describe("Tool Definitions", () => {
     });
   });
 
-  it("should have 31 tools total", () => {
-    expect(tools.length).toBe(31);
+  it("should have 33 tools total", () => {
+    expect(tools.length).toBe(33);
   });
 });
 
@@ -1118,7 +1120,7 @@ describe("Unknown Tool Handling", () => {
     const client = await connectClient();
     const { tools } = await client.listTools();
 
-    expect(tools.length).toBe(31);
+    expect(tools.length).toBe(33);
     // Every advertised tool must reach a real branch — not the Unknown-tool
     // default — so a rename in the ListTools block can't drift from the switch.
     for (const tool of tools) {
@@ -1676,10 +1678,10 @@ describe("Locations tools (round-trip)", () => {
     );
   });
 
-  it("exposes 31 tools total", async () => {
+  it("exposes 33 tools total", async () => {
     const client = await connectLocationsClient();
     const { tools } = await client.listTools();
-    expect(tools.length).toBe(31);
+    expect(tools.length).toBe(33);
   });
 
   it("search_locations queries /locations filtered by organization and city", async () => {
@@ -2158,6 +2160,92 @@ describe("Password tools (round-trip)", () => {
 
     expect(isError(result)).toBe(true);
     expect(firstText(result)).toContain("404");
+  });
+
+  it("create_password posts to the org passwords relationship and does not echo the secret", async () => {
+    const client = await connectPasswordClient();
+    mockFetch.mockResolvedValueOnce(
+      createMockResponse({
+        data: {
+          id: "77",
+          type: "passwords",
+          attributes: { name: "Jane Doe - M365", username: "jane@contoso.com", password: "S3cret!" },
+        },
+        meta: {},
+      })
+    );
+
+    const result = await client.callTool({
+      name: "create_password",
+      arguments: {
+        organization_id: 123,
+        name: "Jane Doe - M365",
+        username: "jane@contoso.com",
+        password: "S3cret!",
+        password_category_id: 4,
+      },
+    });
+
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.itglue.com/organizations/123/relationships/passwords");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body as string)).toEqual({
+      data: {
+        type: "passwords",
+        attributes: {
+          name: "Jane Doe - M365",
+          username: "jane@contoso.com",
+          password: "S3cret!",
+          password_category_id: 4,
+        },
+      },
+    });
+    const text = firstText(result);
+    expect(text).toContain("77");
+    expect(text).not.toContain("S3cret!");
+  });
+
+  it("create_password requires organization_id, name and password", async () => {
+    const client = await connectPasswordClient();
+    const result = await client.callTool({
+      name: "create_password",
+      arguments: { organization_id: 123, name: "x" },
+    });
+    expect(isError(result)).toBe(true);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("update_password patches only the supplied fields", async () => {
+    const client = await connectPasswordClient();
+    mockFetch.mockResolvedValueOnce(
+      createMockResponse({
+        data: { id: "77", type: "passwords", attributes: { password: "N3w!" } },
+        meta: {},
+      })
+    );
+
+    const result = await client.callTool({
+      name: "update_password",
+      arguments: { organization_id: 123, id: "77", password: "N3w!" },
+    });
+
+    const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.itglue.com/organizations/123/relationships/passwords/77");
+    expect(options.method).toBe("PATCH");
+    expect(JSON.parse(options.body as string)).toEqual({
+      data: { type: "passwords", attributes: { password: "N3w!" } },
+    });
+    expect(firstText(result)).not.toContain("N3w!");
+  });
+
+  it("update_password with nothing to change does not call IT Glue", async () => {
+    const client = await connectPasswordClient();
+    const result = await client.callTool({
+      name: "update_password",
+      arguments: { organization_id: 123, id: "77" },
+    });
+    expect(isError(result)).toBe(true);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });
 

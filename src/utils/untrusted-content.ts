@@ -114,6 +114,8 @@ export const UNTRUSTED_CONTENT_TOOLS: ReadonlySet<string> = new Set([
   // is exactly the free-text risk this module targets.
   "search_passwords",
   "get_password",
+  "create_password",
+  "update_password",
 
   // Attachment filenames are chosen by whoever uploaded the file, not by
   // the calling agent.

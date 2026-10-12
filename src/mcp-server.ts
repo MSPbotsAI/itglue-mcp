@@ -1530,6 +1530,105 @@ export function createMcpServer(credentialOverrides?: GatewayCredentials): Serve
           required: ["id"],
         },
       },
+      {
+        name: "create_password",
+        description:
+          "Create a password entry under an IT Glue organization. To avoid duplicates, first call " +
+          "search_passwords with organization_id + username and use update_password if one exists. " +
+          "The secret is not echoed back.",
+        annotations: {
+          title: "Create password",
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
+        inputSchema: {
+          type: "object",
+          properties: {
+            organization_id: {
+              type: "number",
+              description: "Organization ID to create the entry in",
+            },
+            name: {
+              type: "string",
+              description: "Entry name, e.g. \"Jane Doe - Microsoft 365\"",
+            },
+            username: {
+              type: "string",
+              description: "Username / login",
+            },
+            password: {
+              type: "string",
+              description: "The secret value",
+            },
+            url: {
+              type: "string",
+              description: "Login URL",
+            },
+            notes: {
+              type: "string",
+              description: "Free-text notes",
+            },
+            password_category_id: {
+              type: "number",
+              description: "Password category ID",
+            },
+          },
+          required: ["organization_id", "name", "password"],
+        },
+      },
+      {
+        name: "update_password",
+        description:
+          "Update an existing IT Glue password entry. Only the fields you supply are changed. " +
+          "The secret is not echoed back.",
+        annotations: {
+          title: "Update password",
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
+        inputSchema: {
+          type: "object",
+          properties: {
+            organization_id: {
+              type: "number",
+              description: "Organization ID that owns the entry",
+            },
+            id: {
+              type: "string",
+              description: "The password entry ID to update",
+            },
+            name: {
+              type: "string",
+              description: "Entry name, e.g. \"Jane Doe - Microsoft 365\"",
+            },
+            username: {
+              type: "string",
+              description: "Username / login",
+            },
+            password: {
+              type: "string",
+              description: "The secret value",
+            },
+            url: {
+              type: "string",
+              description: "Login URL",
+            },
+            notes: {
+              type: "string",
+              description: "Free-text notes",
+            },
+            password_category_id: {
+              type: "number",
+              description: "Password category ID",
+            },
+          },
+          required: ["organization_id", "id"],
+        },
+      },
       // Documents
       {
         name: "search_documents",
@@ -2537,6 +2636,46 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify(password, null, 2),
             },
           ],
+        };
+      }
+
+      case "create_password":
+      case "update_password": {
+        const isCreate = name === "create_password";
+        const argv = (args ?? {}) as Record<string, unknown>;
+        if (!argv.organization_id || (isCreate ? !argv.name || !argv.password : !argv.id)) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: isCreate
+                  ? "Error: organization_id, name and password are required"
+                  : "Error: organization_id and id are required",
+              },
+            ],
+            isError: true,
+          };
+        }
+        const attributes: Record<string, unknown> = {};
+        for (const field of ["name", "username", "password", "url", "notes", "password_category_id"]) {
+          const value = argv[field];
+          if (value !== undefined && value !== null) attributes[field] = value;
+        }
+        if (!isCreate && Object.keys(attributes).length === 0) {
+          return {
+            content: [{ type: "text", text: "Error: provide at least one field to update (e.g. password, username)" }],
+            isError: true,
+          };
+        }
+        const base = `/organizations/${argv.organization_id}/relationships/passwords`;
+        const body = { data: { type: "passwords", attributes } };
+        const saved = isCreate
+          ? await client.post<unknown>(base, body)
+          : await client.patch<unknown>(`${base}/${argv.id}`, body);
+        // Never echo the secret back into the model's context.
+        const [record] = stripPasswordValues([saved]);
+        return {
+          content: [{ type: "text", text: JSON.stringify(record, null, 2) }],
         };
       }
 
